@@ -328,6 +328,16 @@ const typeContainsFunction = (ty: AscentType, env: TypeEnv, seen: Set<string> = 
   }
 };
 
+// prelude.md's 'pair(a, b)' / 'entry(k, v)' — call-only sugar (see the
+// 'call' case's own comment below), not real function values: like every
+// other built-in function (print, prompt, …), there is no first-class
+// 'Fn(...)->...' type for them to have, since resolving Pair<A,B>/Entry<K,V>'s
+// A/B fresh at each call site is exactly the let-polymorphism this checker
+// doesn't have for any function, built-in or user-defined. Shared by the
+// 'call' case (which handles being *called*) and the 'slot' case (which
+// reports N0013 — "call it, don't hold it" — when one is referenced bare).
+const PAIR_ENTRY_CALLEES: ReadonlySet<string> = new Set(['pair', 'entry']);
+
 export const synth = (expr: Expr, env: TypeEnv, diagnostics: Diagnostics): TypedExpr => {
   switch (expr.kind) {
     case 'literal': {
@@ -378,10 +388,11 @@ export const synth = (expr: Expr, env: TypeEnv, diagnostics: Diagnostics): Typed
         // async function — a built-in (the 'prompt' family) or an imported
         // stdlib export (readLines, the 'fs' module) — can only be prepared
         // with '!' and awaited, so it gets its own message (N0017); an ambient
-        // sync builtin (print) or imported sync stdlib function (min) has no
-        // first-class type yet — it can only be called — so it's N0013,
-        // clearer than "undefined name". A call 'print(x)' never reaches here
-        // (it's a 'call' node). Otherwise the name simply isn't declared (N0001).
+        // sync builtin (print, pair, entry) or imported sync stdlib function
+        // (min) has no first-class type yet — it can only be called — so it's
+        // N0013, clearer than "undefined name". A call 'print(x)' never
+        // reaches here (it's a 'call' node). Otherwise the name simply isn't
+        // declared (N0001).
         const importedModule = env.getImportedFn(expr.name);
         let code = 'N0001';
         if (env.getNamespace(expr.name) !== null) code = 'N0016';
@@ -389,7 +400,7 @@ export const synth = (expr: Expr, env: TypeEnv, diagnostics: Diagnostics): Typed
           ASYNC_FUNCTIONS[expr.name] !== undefined
           || (importedModule !== null && ASYNC_MODULE_SIGS[importedModule]?.[expr.name] !== undefined)
         ) code = 'N0017';
-        else if (FUNCTIONS[expr.name] !== undefined || importedModule !== null) code = 'N0013';
+        else if (FUNCTIONS[expr.name] !== undefined || importedModule !== null || PAIR_ENTRY_CALLEES.has(expr.name)) code = 'N0013';
         diagnostics.error({ code, span: expr.span, data: { name: expr.name } });
         return { ...expr, type: INVALID_TYPE };
       }
@@ -399,6 +410,30 @@ export const synth = (expr: Expr, env: TypeEnv, diagnostics: Diagnostics): Typed
     case 'call': {
       const typedArgs = expr.args.map(arg => synth(arg, env, diagnostics));
       const invalid = (): TypedExpr => ({ kind: 'call', callee: expr.callee, args: typedArgs, type: INVALID_TYPE, span: expr.span });
+
+      // prelude.md's 'pair(a, b)' / 'entry(k, v)' — positional convenience
+      // wrappers around 'Pair{ first: a, second: b }' / 'Entry{ key: k, value:
+      // v }' (see synthTwoFieldConstruct above, which this reuses the field
+      // names of). Checked before the FUNCTIONS table below, since — like the
+      // brace form — the result's component types come straight from the two
+      // argument values, which FUNCTIONS' fixed, monomorphic 'result:
+      // AscentType' per entry has no way to express. Desugars straight into
+      // the same 'construct' node the brace form produces, so the interpreter
+      // needs no separate pair/entry-specific runtime case.
+      if (PAIR_ENTRY_CALLEES.has(expr.callee)) {
+        const tag = expr.callee === 'pair' ? 'Pair' : 'Entry';
+        if (typedArgs.some(a => isInvalidType(a.type)) || !requireArity(2, typedArgs.length, diagnostics, expr.span)) {
+          return { kind: 'construct', typeName: tag, fields: [], type: INVALID_TYPE, span: expr.span };
+        }
+        const [a, b] = typedArgs as [TypedExpr, TypedExpr];
+        const [nameA, nameB] = expr.callee === 'pair' ? ['first', 'second'] as const : ['key', 'value'] as const;
+        const buildType = expr.callee === 'pair' ? pairOf : entryOf;
+        const fields: TypedFieldInit[] = [
+          { name: nameA, declaredType: a.type, value: a },
+          { name: nameB, declaredType: b.type, value: b },
+        ];
+        return { kind: 'construct', typeName: tag, fields, type: buildType(a.type, b.type), span: expr.span };
+      }
 
       // A built-in free function (print today) is checked against its own
       // signature, which may carry a trait bound the user-function path has no

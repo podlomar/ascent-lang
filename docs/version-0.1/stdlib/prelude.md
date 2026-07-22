@@ -119,17 +119,21 @@ Three small types ship **in scope, no import** — because the collection types 
 
 ```
 type Pair<A, B> = { first: A, second: B }
+
+pair(first: A, second: B): Pair<A, B>     # prelude helper — pair(1, "one")
 ```
 
-The **named-not-positional** replacement for a 2-tuple (§6 rejects tuples). Two values with *named* fields — `p.first`, `p.second` — so there is no `.0` / `.1` index to mix up and a swap is impossible. Constructed and read like any record: `Pair{ first: 1, second: "one" }`, then `p.first`. `zip(xs, ys)` returns `List<Pair<A, B>>`; it is also the honest return type for a function producing two related values without a bespoke record.
+The **named-not-positional** replacement for a 2-tuple (§6 rejects tuples). Two values with *named* fields — `p.first`, `p.second` — so there is no `.0` / `.1` index to mix up and a swap is impossible. Constructed and read like any record: `Pair{ first: 1, second: "one" }`, then `p.first`. The prelude **`pair(a, b)`** function is the brief way to build one — a positional function call producing the named record. `zip(xs, ys)` returns `List<Pair<A, B>>`; it is also the honest return type for a function producing two related values without a bespoke record.
 
 ### `Entry<K, V>` — a key-to-value association
 
 ```
 type Entry<K, V> = { key: K, value: V }
+
+entry(key: K, value: V): Entry<K, V>      # prelude helper — entry("a", 1)
 ```
 
-Structurally a `Pair`, but **semantically a mapping** — the field names `key` / `value` say which is which, where `first` / `second` would not. This is what a `Dict` yields when iterated: `for entry in scores.entries() { print("${entry.key}: ${entry.value}") }`. Keeping `Entry` distinct from `Pair` is the same "names over positions" principle that rejected tuples — the semantic names are the whole point.
+Structurally a `Pair`, but **semantically a mapping** — the field names `key` / `value` say which is which, where `first` / `second` would not. This is what a `Dict` yields when iterated: `for entry in scores.entries() { print("${entry.key}: ${entry.value}") }`. The prelude **`entry(k, v)`** function builds one briefly. Keeping `Entry` distinct from `Pair` is the same "names over positions" principle that rejected tuples — the semantic names are the whole point.
 
 ### `Ordering` — the result of a comparison
 

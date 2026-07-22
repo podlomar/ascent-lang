@@ -15,7 +15,12 @@ import { typeToString } from '../src/types/types.js';
 // 'key'/'value') from the already-known type of the value being destructured
 // (the init, the loop's element type, or the match subject) rather than from
 // a tag alone. Ordering isn't generic, so it's a real pre-registered Named
-// type (src/check/env.ts) and gets full match/exhaustiveness support for free.
+// type (src/check/env.ts) and gets full match/exhaustiveness support for
+// free. 'pair(a, b)'/'entry(k, v)' are prelude call-only sugar around the
+// brace form (desugared straight to a 'construct' node in synth.ts) — not
+// real function values, the same limitation every other built-in function
+// (print, prompt, …) already has, since this checker has no let-polymorphism
+// for a function whose type varies per call site.
 
 async function evalOk(src: string): Promise<RuntimeValue> {
   const { program, diagnostics } = parse(src, testCapabilities);
@@ -134,6 +139,68 @@ describe('ambient helper types (Pair / Entry / Ordering, prelude.md)', () => {
 
     it('is a non-shadowable name (N0008 on redeclaration)', () => {
       assert.deepEqual(errorCodes('type Entry = { x: Int };'), ['N0008']);
+    });
+  });
+
+  describe('pair(a, b) / entry(k, v) — prelude positional-call sugar', () => {
+    it('pair(a, b) builds the same value as Pair{ first: a, second: b }', async () => {
+      assert.deepEqual(await evalOk('pair(1, "one") == Pair{ first: 1, second: "one" };'), { type: 'Bool', value: true });
+    });
+
+    it('entry(k, v) builds the same value as Entry{ key: k, value: v }', async () => {
+      assert.deepEqual(await evalOk('entry("a", 1) == Entry{ key: "a", value: 1 };'), { type: 'Bool', value: true });
+    });
+
+    it('infers its type from the argument values', () => {
+      assert.equal(typeOfLast('pair(1, "one");'), 'Pair<Int, String>');
+      assert.equal(typeOfLast('entry("a", 1);'), 'Entry<String, Int>');
+    });
+
+    it('reads first/second, key/value off the result', async () => {
+      assert.deepEqual(await evalOk('pair(1, "one").second;'), { type: 'String', value: 'one' });
+      assert.deepEqual(await evalOk('entry("a", 1).value;'), { type: 'Int', value: 1n });
+    });
+
+    it('widens like a construction when checked against an expected type', async () => {
+      assert.deepEqual(
+        await evalOk('fix p: Pair<Float, String> = pair(1, "one"); p.first;'),
+        { type: 'Float', value: 1 },
+      );
+    });
+
+    it('destructures the same way Pair{...}/Entry{...} do', async () => {
+      assert.deepEqual(await evalOk('fix Pair{ first, second } = pair(1, "one"); second;'), { type: 'String', value: 'one' });
+    });
+
+    it('rejects the wrong number of arguments (T0014)', () => {
+      assert.deepEqual(errorCodes('pair(1);'), ['T0014']);
+      assert.deepEqual(errorCodes('pair(1, 2, 3);'), ['T0014']);
+      assert.deepEqual(errorCodes('entry(1);'), ['T0014']);
+    });
+
+    it('carries the T0064 function-equality carve-out, same as the brace form', () => {
+      assert.deepEqual(
+        errorCodes('fix f = fn(x: Int): Int => x; pair(f, 1) == pair(f, 1);'),
+        ['T0064'],
+      );
+    });
+
+    // pair/entry are call-only sugar, not real function values — there is no
+    // let-polymorphism in this checker for *any* function, built-in or
+    // user-defined, so a slot can't hold something whose type varies per call
+    // site. Same limitation print/prompt/imported stdlib functions already
+    // have; referencing one bare should give the same clear N0013 ("call it,
+    // don't hold it"), not a generic "undefined name" (N0001).
+    it('rejects a bare reference as a value (N0013), not "undefined name"', () => {
+      assert.deepEqual(errorCodes('fix x = pair;'), ['N0013']);
+      assert.deepEqual(errorCodes('fix x = entry;'), ['N0013']);
+    });
+
+    it('rejects being passed where a function value is expected (N0013)', () => {
+      assert.deepEqual(
+        errorCodes('fix apply2 = fn(f: Fn(Int, String) -> Int, a: Int, b: String): Int => 0; apply2(pair, 1, "x");'),
+        ['N0013'],
+      );
     });
   });
 
