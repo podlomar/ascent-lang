@@ -323,6 +323,123 @@ describe('List methods (end-to-end)', () => {
     });
   });
 
+  describe('.sort()', () => {
+    it('sorts Ints ascending', async () => {
+      assert.deepEqual(await evalOk('[3, 1, 2].sort();'), {
+        type: 'List', elements: [{ type: 'Int', value: 1n }, { type: 'Int', value: 2n }, { type: 'Int', value: 3n }],
+      });
+    });
+
+    it('sorts Floats ascending', async () => {
+      assert.deepEqual(await evalOk('[3.0, 1.0, 2.0].sort();'), {
+        type: 'List', elements: [{ type: 'Float', value: 1 }, { type: 'Float', value: 2 }, { type: 'Float', value: 3 }],
+      });
+    });
+
+    it('sorts Strings lexicographically', async () => {
+      assert.deepEqual(await evalOk('["banana", "apple", "cherry"].sort();'), {
+        type: 'List',
+        elements: [{ type: 'String', value: 'apple' }, { type: 'String', value: 'banana' }, { type: 'String', value: 'cherry' }],
+      });
+    });
+
+    it('is [] for an empty receiver', async () => {
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.sort();'), { type: 'List', elements: [] });
+    });
+
+    it('reports T0066 for a non-Comparable element type (records)', () => {
+      assert.deepEqual(
+        errorCodes('type Player = { name: String, score: Int }; fix ps: List<Player> = []; ps.sort();'),
+        ['T0066'],
+      );
+    });
+  });
+
+  describe('.sortBy(key)', () => {
+    it('sorts records by a Comparable key', async () => {
+      const src = [
+        'type Player = { name: String, score: Int };',
+        'fix ps = [Player{ name: "a", score: 3 }, Player{ name: "b", score: 1 }, Player{ name: "c", score: 2 }];',
+        'ps.sortBy(fn(p: Player): Int => p.score).map(fn(p: Player): Int => p.score);',
+      ].join('\n');
+      assert.deepEqual(await evalOk(src), {
+        type: 'List', elements: [{ type: 'Int', value: 1n }, { type: 'Int', value: 2n }, { type: 'Int', value: 3n }],
+      });
+    });
+
+    it('is a stable sort — equal keys keep their relative order', async () => {
+      const src = [
+        'type Player = { name: String, score: Int };',
+        'fix ps = [Player{ name: "a", score: 1 }, Player{ name: "b", score: 1 }, Player{ name: "c", score: 0 }];',
+        'ps.sortBy(fn(p: Player): Int => p.score).map(fn(p: Player): String => p.name);',
+      ].join('\n');
+      assert.deepEqual(await evalOk(src), {
+        type: 'List', elements: [{ type: 'String', value: 'c' }, { type: 'String', value: 'a' }, { type: 'String', value: 'b' }],
+      });
+    });
+
+    it('reports T0066 when the key type is not Comparable', () => {
+      assert.deepEqual(
+        errorCodes('type Player = { name: String, score: Int }; fix ps: List<Player> = []; ps.sortBy(fn(p: Player): Player => p);'),
+        ['T0066'],
+      );
+    });
+
+    it('reports T0065 when the argument is not a function at all', () => {
+      assert.deepEqual(errorCodes('[1, 2].sortBy(1);'), ['T0065']);
+    });
+  });
+
+  describe('.sortWith(cmp)', () => {
+    it('sorts using a custom comparator returning Ordering', async () => {
+      const cmp = 'fn(a: Int, b: Int): Ordering => if (a > b) { Less } else { if (a < b) { Greater } else { Equal } }';
+      assert.deepEqual(await evalOk(`[1, 3, 2].sortWith(${cmp});`), {
+        type: 'List', elements: [{ type: 'Int', value: 3n }, { type: 'Int', value: 2n }, { type: 'Int', value: 1n }],
+      });
+    });
+
+    it('is [] for an empty receiver', async () => {
+      const cmp = 'fn(a: Int, b: Int): Ordering => Equal';
+      assert.deepEqual(await evalOk(`fix xs: List<Int> = []; xs.sortWith(${cmp});`), { type: 'List', elements: [] });
+    });
+
+    it('reports T0015 when the callback does not return Ordering', () => {
+      assert.deepEqual(errorCodes('[1, 2].sortWith(fn(a: Int, b: Int): Bool => a < b);'), ['T0015']);
+    });
+
+    it('reports T0065 when the argument is not a function at all', () => {
+      assert.deepEqual(errorCodes('[1, 2].sortWith(1);'), ['T0065']);
+    });
+  });
+
+  describe('.min() / .max()', () => {
+    it('returns the smallest and largest element', async () => {
+      assert.deepEqual(await evalOk('[3, 1, 2].min();'), { type: 'Int', value: 1n });
+      assert.deepEqual(await evalOk('[3, 1, 2].max();'), { type: 'Int', value: 3n });
+    });
+
+    it('returns None for an empty receiver, honestly, instead of crashing', async () => {
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.min();'), { type: 'None' });
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.max();'), { type: 'None' });
+    });
+
+    it('works on Strings and Floats too', async () => {
+      assert.deepEqual(await evalOk('["banana", "apple"].min();'), { type: 'String', value: 'apple' });
+      assert.deepEqual(await evalOk('[1.5, 2.5].max();'), { type: 'Float', value: 2.5 });
+    });
+
+    it('reports T0066 for a non-Comparable element type (records)', () => {
+      assert.deepEqual(
+        errorCodes('type Player = { name: String, score: Int }; fix ps: List<Player> = []; ps.min();'),
+        ['T0066'],
+      );
+      assert.deepEqual(
+        errorCodes('type Player = { name: String, score: Int }; fix ps: List<Player> = []; ps.max();'),
+        ['T0066'],
+      );
+    });
+  });
+
   describe('map/filter/reduce composed together', () => {
     it('chains map -> filter -> reduce in one expression', async () => {
       assert.deepEqual(

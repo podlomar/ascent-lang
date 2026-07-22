@@ -1,7 +1,7 @@
 import type { Span } from '../lexer/token.js';
 import {
   AscentType, TypeKind, INT_TYPE, FLOAT_TYPE, BOOL_TYPE, STRING_TYPE, DONE_TYPE,
-  listOfType, optionalOf, leastCommonType, typesEqual, typeToString, functionType, INVALID_TYPE,
+  listOfType, optionalOf, leastCommonType, typesEqual, typeToString, functionType, namedType, INVALID_TYPE,
 } from '../types/types.js';
 import { Diagnostics, requireArity, typeMismatch } from './diagnostics.js';
 import { Trait, satisfies } from './traits.js';
@@ -103,6 +103,17 @@ const requireCallback = (
     return null;
   }
   return arg.result;
+};
+
+// sort/min/max need T: Comparable on the element itself; sortBy needs it on
+// the callback's own key type (K) instead — the element itself never has to
+// be orderable, since sortBy exists precisely for records that aren't
+// (stdlib/list.md). Both report the same T0066 — present-but-unmet bound, not
+// a missing method (T0012 is for that) — pointing at sortBy/sortWith.
+const requireComparable = (type: AscentType, diagnostics: Diagnostics, span: Span): boolean => {
+  if (satisfies('Comparable', type)) return true;
+  diagnostics.error({ code: 'T0066', span, data: { type: typeToString(type) } });
+  return false;
 };
 
 export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
@@ -306,6 +317,49 @@ export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
         if (recv.kind !== 'List') return INVALID_TYPE;
         const ct = leastCommonType(recv.elem, args[0]!);
         return ct === null ? typeMismatch('T0015', diagnostics, span, recv.elem, args[0]!) : optionalOf(INT_TYPE);
+      },
+    },
+    // stdlib/list.md's Ordering section. sort/min/max need T: Comparable on
+    // the element itself (🔒 scalars only, until traits land); sortBy needs it
+    // on the key K instead, so it works for records that aren't Comparable
+    // themselves. sortWith's comparator has a fixed, non-free result
+    // (Ordering), so it reuses requireCallback exactly like filter's Bool.
+    sort: {
+      arity: 0,
+      resolve: (recv, _args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        return requireComparable(recv.elem, diagnostics, span) ? listOfType(recv.elem) : INVALID_TYPE;
+      },
+    },
+    sortBy: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const key = requireCallback([recv.elem], null, args[0]!, diagnostics, span);
+        if (key === null) return INVALID_TYPE;
+        return requireComparable(key, diagnostics, span) ? listOfType(recv.elem) : INVALID_TYPE;
+      },
+    },
+    sortWith: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const cmp = requireCallback([recv.elem, recv.elem], namedType('Ordering'), args[0]!, diagnostics, span);
+        return cmp === null ? INVALID_TYPE : listOfType(recv.elem);
+      },
+    },
+    min: {
+      arity: 0,
+      resolve: (recv, _args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        return requireComparable(recv.elem, diagnostics, span) ? optionalOf(recv.elem) : INVALID_TYPE;
+      },
+    },
+    max: {
+      arity: 0,
+      resolve: (recv, _args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        return requireComparable(recv.elem, diagnostics, span) ? optionalOf(recv.elem) : INVALID_TYPE;
       },
     },
     append: { arity: 1, resolve: appendLike },

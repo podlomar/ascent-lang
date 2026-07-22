@@ -2,7 +2,7 @@ import type { Span } from '../lexer/token.js';
 import type { AscentType } from '../types/types.js';
 import { RuntimeError } from '../errors/runtime-error.js';
 import {
-  coerce, formatFloat, graphemesOf, scalarToString, valuesEqual,
+  coerce, formatFloat, graphemesOf, scalarToString, valuesEqual, isNumeric, asFloat,
   intVal, floatVal, strVal, boolVal, NONE,
   type RuntimeValue, type IntValue, type FloatValue, type BoolValue, type StringValue, type ListValue, type RangeValue,
 } from './values.js';
@@ -227,6 +227,45 @@ const findMatchIndex = async (
   return -1;
 };
 
+// stdlib/list.md's Ordering section: the checker has already proved the
+// element type is Comparable (T0066 otherwise), so it's always Int, Float, or
+// String (🔒 scalars today) — the only three cases here. Two Ints compare
+// exactly as BigInts, matching valuesEqual's own reasoning for avoiding a
+// huge Int's float-precision loss; any Int/Float mix promotes the same way.
+const naturalCompare = (a: RuntimeValue, b: RuntimeValue): number => {
+  if (isNumeric(a) && isNumeric(b)) {
+    if (a.type === 'Int' && b.type === 'Int') return a.value < b.value ? -1 : a.value > b.value ? 1 : 0;
+    const av = asFloat(a), bv = asFloat(b);
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  }
+  const as = (a as StringValue).value, bs = (b as StringValue).value;
+  return as < bs ? -1 : as > bs ? 1 : 0;
+};
+
+// sortWith's comparator is user code, so — unlike sort/sortBy, which can hand
+// every key to the JS engine's own (synchronous) '.sort()' — it needs a sort
+// that awaits between comparisons. A plain merge sort is the standard way to
+// get that, and it's stable for free (the '<= 0' tie-break below always takes
+// from 'left', the earlier run, first) — matching Array.prototype.sort's own
+// stability, which sort/sortBy already inherit from the JS engine.
+const asyncMergeSort = async (
+  items: RuntimeValue[], cmp: (a: RuntimeValue, b: RuntimeValue) => Promise<number>,
+): Promise<RuntimeValue[]> => {
+  if (items.length <= 1) return items;
+  const mid = items.length >> 1;
+  const left = await asyncMergeSort(items.slice(0, mid), cmp);
+  const right = await asyncMergeSort(items.slice(mid), cmp);
+  const merged: RuntimeValue[] = [];
+  let i = 0, j = 0;
+  while (i < left.length && j < right.length) {
+    if ((await cmp(left[i]!, right[j]!)) <= 0) merged.push(left[i++]!);
+    else merged.push(right[j++]!);
+  }
+  while (i < left.length) merged.push(left[i++]!);
+  while (j < right.length) merged.push(right[j++]!);
+  return merged;
+};
+
 const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
   length: r => intVal(BigInt(r.elements.length)),
   isEmpty: r => boolVal(r.elements.length === 0),
@@ -348,6 +387,35 @@ const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
     const i = r.elements.findIndex(el => valuesEqual(el, args[0]!));
     return i === -1 ? NONE : intVal(BigInt(i));
   },
+  // The checker has already proved the element is Comparable (T0066
+  // otherwise), so the JS engine's own (synchronous, stable) sort suffices —
+  // no need for sortWith's async merge sort.
+  sort: r => ({ type: 'List', elements: [...r.elements].sort(naturalCompare) }),
+  // Decorate-sort-undecorate: each key is computed once (sequentially, like
+  // every other callback-taking method here — not Promise.all, so a key
+  // function's evaluation order matches a beginner's "runs once per element"
+  // model) rather than recomputed on every comparison during the sort.
+  sortBy: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const elemType = elemTypeOf(ctx.receiverType)!;
+    const decorated: { el: RuntimeValue; key: RuntimeValue }[] = [];
+    for (const el of r.elements) {
+      decorated.push({ el, key: await ctx.applyFn(fn, [el], [elemType]) });
+    }
+    decorated.sort((a, b) => naturalCompare(a.key, b.key));
+    return { type: 'List', elements: decorated.map(d => d.el) };
+  },
+  sortWith: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const elemType = elemTypeOf(ctx.receiverType)!;
+    const cmp = async (a: RuntimeValue, b: RuntimeValue): Promise<number> => {
+      const ordering = await ctx.applyFn(fn, [a, b], [elemType, elemType]) as Extract<RuntimeValue, { type: 'Record' }>;
+      return ordering.name === 'Less' ? -1 : ordering.name === 'Greater' ? 1 : 0;
+    };
+    return { type: 'List', elements: await asyncMergeSort(r.elements, cmp) };
+  },
+  min: r => r.elements.length === 0 ? NONE : r.elements.reduce((a, b) => naturalCompare(a, b) <= 0 ? a : b),
+  max: r => r.elements.length === 0 ? NONE : r.elements.reduce((a, b) => naturalCompare(a, b) >= 0 ? a : b),
   append: (r, args, ctx) => {
     const toElem = elemTypeOf(ctx.resultType);
     return {

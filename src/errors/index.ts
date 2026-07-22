@@ -1350,6 +1350,14 @@ export const ERRORS: ErrorEntry[] = [
     "summary": "An argument that must be a function value is something else.",
     "message": "This input has type {actual}, but a function value was expected here.",
     "explanation": "Some methods — like 'map' — take a function as an argument, and run it once for each item. Here a function value was expected, written something like 'fn(x: Int): String => ...', but the value given has type {actual}."
+  },
+  {
+    "code": "T0066",
+    "name": "list-not-comparable",
+    "category": "type",
+    "summary": "'sort'/'min'/'max' was used on a list whose elements can't be ordered.",
+    "message": "{type} can't be ordered — sort by a key with 'sortBy', or supply a comparator with 'sortWith'.",
+    "explanation": "'sort', 'min', and 'max' work by comparing every pair of elements, so they need an element type that can be ordered — Int, Float, and String can be, today. {type} can't be. If the elements are records, sort by one of their orderable fields with 'sortBy', or write your own comparator with 'sortWith'."
   }
 ];
 
