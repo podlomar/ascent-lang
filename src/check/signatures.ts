@@ -124,9 +124,23 @@ export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
     toFloat: { params: [], result: optionalOf(FLOAT_TYPE) },
     toBool: { params: [], result: optionalOf(BOOL_TYPE) },
   },
+  // stdlib/list.md: 'at' is the honest lookup (T?, None out of range — negative
+  // indices included, since there is no Python-style from-the-end); 'first' /
+  // 'last' are None only on an empty receiver. All three mirror String's
+  // first/last (§9) — absence is a value here, not the R0005 crash 'xs[i]' is.
   List: {
     length: { params: [], result: INT_TYPE },
     isEmpty: { params: [], result: BOOL_TYPE },
+    at: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        if (!typesEqual(args[0]!, INT_TYPE)) return typeMismatch('T0015', diagnostics, span, INT_TYPE, args[0]!);
+        return optionalOf(recv.elem);
+      },
+    },
+    first: { arity: 0, resolve: recv => recv.kind === 'List' ? optionalOf(recv.elem) : INVALID_TYPE },
+    last: { arity: 0, resolve: recv => recv.kind === 'List' ? optionalOf(recv.elem) : INVALID_TYPE },
     reverse: { arity: 0, resolve: recv => recv.kind === 'List' ? listOfType(recv.elem) : INVALID_TYPE },
     append: { arity: 1, resolve: appendLike },
     prepend: { arity: 1, resolve: appendLike },

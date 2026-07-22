@@ -208,6 +208,15 @@ const widenAll = (vs: RuntimeValue[], from: AscentType | null, to: AscentType | 
 const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
   length: r => intVal(BigInt(r.elements.length)),
   isEmpty: r => boolVal(r.elements.length === 0),
+  // stdlib/list.md: non-negative positions from the front only — a negative
+  // index is simply not a valid position (no Python-style from-the-end), so it
+  // is None exactly like an index past the end, never a crash.
+  at: (r, args) => {
+    const i = (args[0] as IntValue).value;
+    return i < 0n || i >= BigInt(r.elements.length) ? NONE : r.elements[Number(i)]!;
+  },
+  first: r => r.elements.length === 0 ? NONE : r.elements[0]!,
+  last: r => r.elements.length === 0 ? NONE : r.elements[r.elements.length - 1]!,
   reverse: (r, _args, ctx) => ({
     type: 'List',
     elements: widenAll([...r.elements].reverse(), elemTypeOf(ctx.receiverType), elemTypeOf(ctx.resultType)),
