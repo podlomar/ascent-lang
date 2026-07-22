@@ -1358,6 +1358,14 @@ export const ERRORS: ErrorEntry[] = [
     "summary": "'sort'/'min'/'max' was used on a list whose elements can't be ordered.",
     "message": "{type} can't be ordered — sort by a key with 'sortBy', or supply a comparator with 'sortWith'.",
     "explanation": "'sort', 'min', and 'max' work by comparing every pair of elements, so they need an element type that can be ordered — Int, Float, and String can be, today. {type} can't be. If the elements are records, sort by one of their orderable fields with 'sortBy', or write your own comparator with 'sortWith'."
+  },
+  {
+    "code": "T0067",
+    "name": "arg-not-list",
+    "category": "type",
+    "summary": "An argument that must be a List is something else.",
+    "message": "This input has type {actual}, but a List was expected here.",
+    "explanation": "'zip' pairs up two lists element by element, so its argument has to be a List too. Here a List was expected, but the value given has type {actual}."
   }
 ];
 

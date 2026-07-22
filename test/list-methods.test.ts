@@ -440,6 +440,80 @@ describe('List methods (end-to-end)', () => {
     });
   });
 
+  describe('.zip(other)', () => {
+    it('pairs up elements from both lists', async () => {
+      assert.deepEqual(await evalOk('[1, 2].zip(["a", "b"]);'), {
+        type: 'List',
+        elements: [
+          {
+            type: 'Record', name: 'Pair',
+            fields: new Map<string, RuntimeValue>([['first', { type: 'Int', value: 1n }], ['second', { type: 'String', value: 'a' }]]),
+          },
+          {
+            type: 'Record', name: 'Pair',
+            fields: new Map<string, RuntimeValue>([['first', { type: 'Int', value: 2n }], ['second', { type: 'String', value: 'b' }]]),
+          },
+        ],
+      });
+    });
+
+    it('truncates to the shorter list — no partial pairs', async () => {
+      assert.deepEqual(await evalOk('[1, 2, 3].zip(["a", "b"]).length();'), { type: 'Int', value: 2n });
+      assert.deepEqual(await evalOk('[1].zip(["a", "b", "c"]).length();'), { type: 'Int', value: 1n });
+    });
+
+    it('is [] when either list is empty', async () => {
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.zip(["a"]);'), { type: 'List', elements: [] });
+    });
+
+    it('type-checks as List<Pair<T, U>>', () => {
+      assert.equal(typeOfLast('[1, 2].zip(["a", "b"]);'), 'List<Pair<Int, String>>');
+    });
+
+    it('reports T0067 when the argument is not a list at all', () => {
+      assert.deepEqual(errorCodes('[1, 2].zip(1);'), ['T0067']);
+    });
+  });
+
+  describe('.enumerate()', () => {
+    it('pairs each element with its index', async () => {
+      assert.deepEqual(
+        await evalOk('["a", "b"].enumerate().map(fn(p: Pair<Int, String>): String => "${p.first}:${p.second}");'),
+        { type: 'List', elements: [{ type: 'String', value: '0:a' }, { type: 'String', value: '1:b' }] },
+      );
+    });
+
+    it('is [] for an empty receiver', async () => {
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.enumerate();'), { type: 'List', elements: [] });
+    });
+
+    it('type-checks as List<Pair<Int, T>>', () => {
+      assert.equal(typeOfLast('["a"].enumerate();'), 'List<Pair<Int, String>>');
+    });
+  });
+
+  describe('.join(sep)', () => {
+    it('joins a List<String> with a separator', async () => {
+      assert.deepEqual(await evalOk('["a", "b", "c"].join(", ");'), { type: 'String', value: 'a, b, c' });
+    });
+
+    it('is "" for an empty receiver', async () => {
+      assert.deepEqual(await evalOk('fix xs: List<String> = []; xs.join(", ");'), { type: 'String', value: '' });
+    });
+
+    it('is the bare element for a single-element receiver — no separator inserted', async () => {
+      assert.deepEqual(await evalOk('["only"].join(", ");'), { type: 'String', value: 'only' });
+    });
+
+    it('reports T0012 (missing method, not a bound violation) for a non-String element type', () => {
+      assert.deepEqual(errorCodes('[1, 2].join(", ");'), ['T0012']);
+    });
+
+    it('reports T0015 when the separator is not a String', () => {
+      assert.deepEqual(errorCodes('["a", "b"].join(1);'), ['T0015']);
+    });
+  });
+
   describe('map/filter/reduce composed together', () => {
     it('chains map -> filter -> reduce in one expression', async () => {
       assert.deepEqual(

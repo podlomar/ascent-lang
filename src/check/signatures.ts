@@ -1,7 +1,7 @@
 import type { Span } from '../lexer/token.js';
 import {
   AscentType, TypeKind, INT_TYPE, FLOAT_TYPE, BOOL_TYPE, STRING_TYPE, DONE_TYPE,
-  listOfType, optionalOf, leastCommonType, typesEqual, typeToString, functionType, namedType, INVALID_TYPE,
+  listOfType, optionalOf, leastCommonType, typesEqual, typeToString, functionType, namedType, pairOf, INVALID_TYPE,
 } from '../types/types.js';
 import { Diagnostics, requireArity, typeMismatch } from './diagnostics.js';
 import { Trait, satisfies } from './traits.js';
@@ -113,6 +113,34 @@ const requireCallback = (
 const requireComparable = (type: AscentType, diagnostics: Diagnostics, span: Span): boolean => {
   if (satisfies('Comparable', type)) return true;
   diagnostics.error({ code: 'T0066', span, data: { type: typeToString(type) } });
+  return false;
+};
+
+// zip's other list is List<U> for a totally unconstrained U — the only
+// source of it is the argument's own element type (mirroring
+// requireCallback's free result), so a non-List argument has nothing to reuse
+// for an 'expected' type and gets its own message (T0067) instead of a
+// fabricated 'List<???>'. Returns the argument's element type on success.
+const requireList = (arg: AscentType, diagnostics: Diagnostics, span: Span): AscentType | null => {
+  if (arg.kind !== 'List') {
+    diagnostics.error({ code: 'T0067', span, data: { actual: typeToString(arg) } });
+    return null;
+  }
+  return arg.elem;
+};
+
+// join (List<String> only) and sum (List<Int>/List<Float> only) are
+// receiver-specific — meaningless for any other element type (stdlib/
+// list.md's taxonomy) — so an unsupported element type is reported as an
+// ordinary missing method (T0012), exactly as if this table had no entry for
+// it at all, not a bound violation (that's T0066's job, for sort/min/max —
+// there the operation IS meaningful, just unmet).
+const requireElem = (
+  recv: Extract<AscentType, { kind: 'List' }>, elemKind: AscentType['kind'], method: string,
+  diagnostics: Diagnostics, span: Span,
+): boolean => {
+  if (recv.elem.kind === elemKind) return true;
+  diagnostics.error({ code: 'T0012', span, data: { method, type: typeToString(recv) } });
   return false;
 };
 
@@ -372,6 +400,34 @@ export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
         if (arg.kind !== 'List') return typeMismatch('T0015', diagnostics, span, listOfType(recv.elem), arg);
         const ct = leastCommonType(recv.elem, arg.elem);
         return ct === null ? typeMismatch('T0015', diagnostics, span, listOfType(recv.elem), arg) : listOfType(ct);
+      },
+    },
+    // stdlib/list.md's "Combine & build". zip pairs T with a totally
+    // unconstrained U — no relation to T required, unlike concat's
+    // leastCommonType — so it takes whatever the other list's element type
+    // is. enumerate is 'zip' against a fixed 0..length Int sequence.
+    zip: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const u = requireList(args[0]!, diagnostics, span);
+        return u === null ? INVALID_TYPE : listOfType(pairOf(recv.elem, u));
+      },
+    },
+    enumerate: {
+      arity: 0,
+      resolve: recv => recv.kind === 'List' ? listOfType(pairOf(INT_TYPE, recv.elem)) : INVALID_TYPE,
+    },
+    // join is receiver-specific to List<String> (the inverse of
+    // String.split) — meaningless for any other element type, so it's a
+    // missing method (T0012) there, not a bound violation.
+    join: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        if (!requireElem(recv, 'String', 'join', diagnostics, span)) return INVALID_TYPE;
+        if (!typesEqual(args[0]!, STRING_TYPE)) return typeMismatch('T0015', diagnostics, span, STRING_TYPE, args[0]!);
+        return STRING_TYPE;
       },
     },
   },

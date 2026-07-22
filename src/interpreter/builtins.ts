@@ -3,7 +3,7 @@ import type { AscentType } from '../types/types.js';
 import { RuntimeError } from '../errors/runtime-error.js';
 import {
   coerce, formatFloat, graphemesOf, scalarToString, valuesEqual, isNumeric, asFloat,
-  intVal, floatVal, strVal, boolVal, NONE,
+  intVal, floatVal, strVal, boolVal, recordVal, NONE,
   type RuntimeValue, type IntValue, type FloatValue, type BoolValue, type StringValue, type ListValue, type RangeValue,
 } from './values.js';
 import { checkIntOverflow } from './arithmetic.js';
@@ -213,6 +213,12 @@ const widen = (v: RuntimeValue, from: AscentType | null, to: AscentType | null):
   from !== null && to !== null ? coerce(v, from, to) : v;
 const widenAll = (vs: RuntimeValue[], from: AscentType | null, to: AscentType | null): RuntimeValue[] =>
   vs.map(v => widen(v, from, to));
+
+// prelude.md's Pair is an ordinary Record at runtime (built the same way the
+// 'construct' node builds one for the brace form or pair(a, b) sugar) — zip
+// and enumerate are the two List methods that hand one back.
+const pairVal = (first: RuntimeValue, second: RuntimeValue) =>
+  recordVal('Pair', new Map([['first', first], ['second', second]]));
 
 // find/findIndex/some (stdlib/list.md's search square) all want "the position
 // of the first element the predicate accepts, or -1" — they differ only in
@@ -441,6 +447,25 @@ const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
       ],
     };
   },
+  // stdlib/list.md: zip truncates to the shorter list rather than crashing or
+  // padding — no partial pairs. Pair<T, U>'s components have no relation to
+  // widen (unlike concat's shared element type), so each side passes through
+  // untouched.
+  zip: (r, args) => {
+    const other = args[0] as ListValue;
+    const n = Math.min(r.elements.length, other.elements.length);
+    const elements: RuntimeValue[] = [];
+    for (let i = 0; i < n; i++) elements.push(pairVal(r.elements[i]!, other.elements[i]!));
+    return { type: 'List', elements };
+  },
+  enumerate: r => ({
+    type: 'List',
+    elements: r.elements.map((el, i) => pairVal(intVal(BigInt(i)), el)),
+  }),
+  // join is receiver-specific to List<String> (the checker has already ruled
+  // out every other element type, T0012), so every element is already a
+  // StringValue here.
+  join: (r, args) => strVal(r.elements.map(el => (el as StringValue).value).join((args[0] as StringValue).value)),
 };
 
 // design.md §4: a Range is Int-only and half-open. length/toList/contains

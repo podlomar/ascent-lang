@@ -722,3 +722,12 @@
     today. {type} can't be. If the elements are records, sort by one of their
     orderable fields with 'sortBy', or write your own comparator with
     'sortWith'.
+
+- code: T0067
+  name: arg-not-list
+  category: type
+  summary: An argument that must be a List is something else.
+  message: "This input has type {actual}, but a List was expected here."
+  explanation: >-
+    'zip' pairs up two lists element by element, so its argument has to be a
+    List too. Here a List was expected, but the value given has type {actual}.
