@@ -2,7 +2,7 @@ import type { Span } from '../lexer/token.js';
 import type { AscentType } from '../types/types.js';
 import { RuntimeError } from '../errors/runtime-error.js';
 import {
-  coerce, formatFloat, graphemesOf, scalarToString,
+  coerce, formatFloat, graphemesOf, scalarToString, valuesEqual,
   intVal, floatVal, strVal, boolVal, NONE,
   type RuntimeValue, type IntValue, type FloatValue, type BoolValue, type StringValue, type ListValue, type RangeValue,
 } from './values.js';
@@ -214,6 +214,19 @@ const widen = (v: RuntimeValue, from: AscentType | null, to: AscentType | null):
 const widenAll = (vs: RuntimeValue[], from: AscentType | null, to: AscentType | null): RuntimeValue[] =>
   vs.map(v => widen(v, from, to));
 
+// find/findIndex/some (stdlib/list.md's search square) all want "the position
+// of the first element the predicate accepts, or -1" — they differ only in
+// what they do with that position, so this is the one loop all three share.
+const findMatchIndex = async (
+  elements: RuntimeValue[], fn: Extract<RuntimeValue, { type: 'Function' }>, elemType: AscentType, applyFn: MethodCtx['applyFn'],
+): Promise<number> => {
+  for (let i = 0; i < elements.length; i++) {
+    const keep = await applyFn(fn, [elements[i]!], [elemType]) as BoolValue;
+    if (keep.value) return i;
+  }
+  return -1;
+};
+
 const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
   length: r => intVal(BigInt(r.elements.length)),
   isEmpty: r => boolVal(r.elements.length === 0),
@@ -290,6 +303,50 @@ const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
       acc = await ctx.applyFn(fn, [acc, el], [accType, elemType]);
     }
     return acc;
+  },
+  find: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const i = await findMatchIndex(r.elements, fn, elemTypeOf(ctx.receiverType)!, ctx.applyFn);
+    return i === -1 ? NONE : r.elements[i]!;
+  },
+  findIndex: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const i = await findMatchIndex(r.elements, fn, elemTypeOf(ctx.receiverType)!, ctx.applyFn);
+    return i === -1 ? NONE : intVal(BigInt(i));
+  },
+  some: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const i = await findMatchIndex(r.elements, fn, elemTypeOf(ctx.receiverType)!, ctx.applyFn);
+    return boolVal(i !== -1);
+  },
+  // 'every' short-circuits on the first mismatch — the empty-list identity
+  // (True, stdlib/list.md) falls out for free since the loop never runs.
+  every: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const elemType = elemTypeOf(ctx.receiverType)!;
+    for (const el of r.elements) {
+      const keep = await ctx.applyFn(fn, [el], [elemType]) as BoolValue;
+      if (!keep.value) return boolVal(false);
+    }
+    return boolVal(true);
+  },
+  count: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const elemType = elemTypeOf(ctx.receiverType)!;
+    let n = 0n;
+    for (const el of r.elements) {
+      const keep = await ctx.applyFn(fn, [el], [elemType]) as BoolValue;
+      if (keep.value) n++;
+    }
+    return intVal(n);
+  },
+  // contains/indexOf compare with universal structural '==' (valuesEqual) —
+  // the checker has already ruled out a function-containing element type
+  // (T0064, in synth.ts), so every element here does have an honest equality.
+  contains: (r, args) => boolVal(r.elements.some(el => valuesEqual(el, args[0]!))),
+  indexOf: (r, args) => {
+    const i = r.elements.findIndex(el => valuesEqual(el, args[0]!));
+    return i === -1 ? NONE : intVal(BigInt(i));
   },
   append: (r, args, ctx) => {
     const toElem = elemTypeOf(ctx.resultType);

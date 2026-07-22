@@ -241,6 +241,88 @@ describe('List methods (end-to-end)', () => {
     });
   });
 
+  describe('.find(pred) / .findIndex(pred)', () => {
+    it('find returns the first matching element, or None', async () => {
+      assert.deepEqual(await evalOk('[1, 2, 3, 4].find(fn(x: Int): Bool => x > 2);'), { type: 'Int', value: 3n });
+      assert.deepEqual(await evalOk('[1, 2].find(fn(x: Int): Bool => x > 10);'), { type: 'None' });
+    });
+
+    it('findIndex returns the position of the first match, or None — never -1', async () => {
+      assert.deepEqual(await evalOk('[10, 20, 30].findIndex(fn(x: Int): Bool => x == 30);'), { type: 'Int', value: 2n });
+      assert.deepEqual(await evalOk('[10, 20].findIndex(fn(x: Int): Bool => x == 99);'), { type: 'None' });
+    });
+
+    it('type-check as T? / Int? — assignable to a slot and comparable to None', async () => {
+      assert.equal(typeOfLast('[1, 2].find(fn(x: Int): Bool => x > 0);'), 'Int?');
+      assert.equal(typeOfLast('[1, 2].findIndex(fn(x: Int): Bool => x > 0);'), 'Int?');
+    });
+
+    it('reports T0065 when the argument is not a function at all', () => {
+      assert.deepEqual(errorCodes('[1, 2].find(1);'), ['T0065']);
+      assert.deepEqual(errorCodes('[1, 2].findIndex(1);'), ['T0065']);
+    });
+  });
+
+  describe('.some(pred) / .every(pred)', () => {
+    it('some is True when at least one element matches', async () => {
+      assert.deepEqual(await evalOk('[1, 2, 3].some(fn(x: Int): Bool => x > 2);'), { type: 'Bool', value: true });
+      assert.deepEqual(await evalOk('[1, 2, 3].some(fn(x: Int): Bool => x > 10);'), { type: 'Bool', value: false });
+    });
+
+    it('every is True only when all elements match', async () => {
+      assert.deepEqual(await evalOk('[1, 2, 3].every(fn(x: Int): Bool => x > 0);'), { type: 'Bool', value: true });
+      assert.deepEqual(await evalOk('[1, 2, 3].every(fn(x: Int): Bool => x > 1);'), { type: 'Bool', value: false });
+    });
+
+    it('empty-list identities: some is False, every is True', async () => {
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.some(fn(x: Int): Bool => True);'), { type: 'Bool', value: false });
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.every(fn(x: Int): Bool => False);'), { type: 'Bool', value: true });
+    });
+  });
+
+  describe('.count(pred)', () => {
+    it('counts the elements where pred matches', async () => {
+      assert.deepEqual(await evalOk('[1, 2, 3, 4, 5].count(fn(x: Int): Bool => x mod 2 == 0);'), { type: 'Int', value: 2n });
+    });
+
+    it('is 0 when nothing matches, including on an empty receiver', async () => {
+      assert.deepEqual(await evalOk('[1, 3].count(fn(x: Int): Bool => x mod 2 == 0);'), { type: 'Int', value: 0n });
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.count(fn(x: Int): Bool => True);'), { type: 'Int', value: 0n });
+    });
+  });
+
+  describe('.contains(value) / .indexOf(value)', () => {
+    it('contains is True exactly when an equal element is present', async () => {
+      assert.deepEqual(await evalOk('[1, 2, 3].contains(2);'), { type: 'Bool', value: true });
+      assert.deepEqual(await evalOk('[1, 2, 3].contains(9);'), { type: 'Bool', value: false });
+    });
+
+    it('indexOf returns the position of the first equal value, or None — never -1', async () => {
+      assert.deepEqual(await evalOk('[10, 20, 30, 20].indexOf(20);'), { type: 'Int', value: 1n });
+      assert.deepEqual(await evalOk('[10, 20].indexOf(99);'), { type: 'None' });
+    });
+
+    it('widens across Int/Float like == itself (leastCommonType, not exact match)', async () => {
+      assert.deepEqual(await evalOk('[1, 2, 3].contains(2.0);'), { type: 'Bool', value: true });
+    });
+
+    it('reports T0015 when the value has an unrelated type', () => {
+      assert.deepEqual(errorCodes('[1, 2].contains("2");'), ['T0015']);
+      assert.deepEqual(errorCodes('[1, 2].indexOf("2");'), ['T0015']);
+    });
+
+    it('reports T0064 for a function-containing element type, same carve-out as ==', () => {
+      assert.deepEqual(
+        errorCodes('type H = { run: Fn(Int) -> Int }; fix f = fn(x: Int): Int => x; fix a = H{ run: f }; [a].contains(a);'),
+        ['T0064'],
+      );
+      assert.deepEqual(
+        errorCodes('type H = { run: Fn(Int) -> Int }; fix f = fn(x: Int): Int => x; fix a = H{ run: f }; [a].indexOf(a);'),
+        ['T0064'],
+      );
+    });
+  });
+
   describe('map/filter/reduce composed together', () => {
     it('chains map -> filter -> reduce in one expression', async () => {
       assert.deepEqual(

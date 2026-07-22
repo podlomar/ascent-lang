@@ -931,7 +931,26 @@ export const synth = (expr: Expr, env: TypeEnv, diagnostics: Diagnostics): Typed
       }
 
       const argTypes = typedArgs.map(a => a.type);
-      const resultType = methodCallType(typedReceiver.type, expr.method, argTypes, diagnostics, expr.span);
+      let resultType = methodCallType(typedReceiver.type, expr.method, argTypes, diagnostics, expr.span);
+
+      // stdlib/list.md: 'contains'/'indexOf' compare each element with '=='
+      // (structural equality), so they carry the same carve-out '==' itself
+      // has (T0064) — a function-containing element type has no honest
+      // equality. methodCallType's resolver has no 'env' to resolve a Named
+      // type's fields (typeContainsFunction needs it), so this checks it here
+      // instead, exactly mirroring the '==' operand check above.
+      if (
+        (expr.method === 'contains' || expr.method === 'indexOf')
+        && typedReceiver.type.kind === 'List' && !isInvalidType(resultType)
+        && (typeContainsFunction(typedReceiver.type.elem, env) || typeContainsFunction(argTypes[0]!, env))
+      ) {
+        diagnostics.error({
+          code: 'T0064', span: expr.span,
+          data: { op: '==', operands: [typedReceiver.type.elem, argTypes[0]!].map(typeToString).join(' and ') },
+        });
+        resultType = INVALID_TYPE;
+      }
+
       return {
         kind: 'methodCall', receiver: typedReceiver, method: expr.method,
         args: typedArgs, type: resultType, span: expr.span,

@@ -245,6 +245,69 @@ export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
         return result === null ? INVALID_TYPE : result;
       },
     },
+    // stdlib/list.md's search square — value or position, by predicate or
+    // equality. find/findIndex/some/every/count share one predicate shape
+    // (Fn(T) -> Bool, same check as filter's); contains/indexOf compare by
+    // structural '==' instead (leastCommonType, like appendLike — a real
+    // widening question, e.g. List<Float>.contains(1)), and separately carry
+    // '=='s own function carve-out, checked in synth.ts (methodCallType has
+    // no 'env' to resolve a Named type's fields).
+    find: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const ok = requireCallback([recv.elem], BOOL_TYPE, args[0]!, diagnostics, span);
+        return ok === null ? INVALID_TYPE : optionalOf(recv.elem);
+      },
+    },
+    findIndex: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const ok = requireCallback([recv.elem], BOOL_TYPE, args[0]!, diagnostics, span);
+        return ok === null ? INVALID_TYPE : optionalOf(INT_TYPE);
+      },
+    },
+    some: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const ok = requireCallback([recv.elem], BOOL_TYPE, args[0]!, diagnostics, span);
+        return ok === null ? INVALID_TYPE : BOOL_TYPE;
+      },
+    },
+    every: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const ok = requireCallback([recv.elem], BOOL_TYPE, args[0]!, diagnostics, span);
+        return ok === null ? INVALID_TYPE : BOOL_TYPE;
+      },
+    },
+    count: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const ok = requireCallback([recv.elem], BOOL_TYPE, args[0]!, diagnostics, span);
+        return ok === null ? INVALID_TYPE : INT_TYPE;
+      },
+    },
+    contains: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const ct = leastCommonType(recv.elem, args[0]!);
+        return ct === null ? typeMismatch('T0015', diagnostics, span, recv.elem, args[0]!) : BOOL_TYPE;
+      },
+    },
+    indexOf: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const ct = leastCommonType(recv.elem, args[0]!);
+        return ct === null ? typeMismatch('T0015', diagnostics, span, recv.elem, args[0]!) : optionalOf(INT_TYPE);
+      },
+    },
     append: { arity: 1, resolve: appendLike },
     prepend: { arity: 1, resolve: appendLike },
     concat: {
