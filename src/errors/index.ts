@@ -390,6 +390,14 @@ export const ERRORS: ErrorEntry[] = [
     "explanation": "'try' outside any function has no enclosing function to hand a 'None' back to, so it stops the program here rather than carry on with nothing to unwrap. Handle the 'None' with 'match' or '??' if it can really happen, or move this 'try' into a function that returns a matching '?' optional so the 'None' propagates there instead."
   },
   {
+    "code": "R0017",
+    "name": "list-slice-out-of-bounds",
+    "category": "runtime",
+    "summary": "'.slice(from, to)' had a from or to outside the list's valid range.",
+    "message": "'.slice({start}, {end})' is out of range for this list.",
+    "explanation": "'.slice(from, to)' counts items from 0 and 'to' is exclusive, so a list with {length} item(s) only accepts a 'from' and 'to' between 0 and {length}, with 'from' no greater than 'to'. '{start}' and '{end}' don't fit that rule here."
+  },
+  {
     "code": "S0001",
     "name": "unclosed-paren",
     "category": "syntactic",

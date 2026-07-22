@@ -64,6 +64,19 @@ const appendLike = (recv: AscentType, args: AscentType[], diagnostics: Diagnosti
   return ct === null ? typeMismatch('T0015', diagnostics, span, recv.elem, args[0]!) : listOfType(ct);
 };
 
+// at/take/drop/slice's Int argument(s) are positions/counts, unrelated to the
+// element type — an argument that isn't Int is an ordinary T0015, not an
+// element-widening question the way append/concat's argument is.
+const requireInts = (args: AscentType[], diagnostics: Diagnostics, span: Span): boolean => {
+  for (const a of args) {
+    if (!typesEqual(a, INT_TYPE)) {
+      typeMismatch('T0015', diagnostics, span, INT_TYPE, a);
+      return false;
+    }
+  }
+  return true;
+};
+
 export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
   Int: {
     toString: { params: [], result: STRING_TYPE },
@@ -135,13 +148,44 @@ export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
       arity: 1,
       resolve: (recv, args, diagnostics, span) => {
         if (recv.kind !== 'List') return INVALID_TYPE;
-        if (!typesEqual(args[0]!, INT_TYPE)) return typeMismatch('T0015', diagnostics, span, INT_TYPE, args[0]!);
+        if (!requireInts(args, diagnostics, span)) return INVALID_TYPE;
         return optionalOf(recv.elem);
       },
     },
     first: { arity: 0, resolve: recv => recv.kind === 'List' ? optionalOf(recv.elem) : INVALID_TYPE },
     last: { arity: 0, resolve: recv => recv.kind === 'List' ? optionalOf(recv.elem) : INVALID_TYPE },
     reverse: { arity: 0, resolve: recv => recv.kind === 'List' ? listOfType(recv.elem) : INVALID_TYPE },
+    // stdlib/list.md: take/drop saturate rather than crash — 'up to n', not an
+    // assertion about length — so, unlike 'at', their Int arg needs no runtime
+    // range check at all, only the type check every List method here does.
+    take: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        if (!requireInts(args, diagnostics, span)) return INVALID_TYPE;
+        return listOfType(recv.elem);
+      },
+    },
+    drop: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        if (!requireInts(args, diagnostics, span)) return INVALID_TYPE;
+        return listOfType(recv.elem);
+      },
+    },
+    // stdlib/list.md: two Int indices (not a Range, which stays reserved for
+    // iteration) — a bad bound crashes at runtime (R0017), same tier as
+    // String.slice's R0006, since a bound violation can depend on a value the
+    // checker can't see ahead of time.
+    slice: {
+      arity: 2,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        if (!requireInts(args, diagnostics, span)) return INVALID_TYPE;
+        return listOfType(recv.elem);
+      },
+    },
     append: { arity: 1, resolve: appendLike },
     prepend: { arity: 1, resolve: appendLike },
     concat: {

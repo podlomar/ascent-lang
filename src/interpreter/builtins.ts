@@ -217,6 +217,28 @@ const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
   },
   first: r => r.elements.length === 0 ? NONE : r.elements[0]!,
   last: r => r.elements.length === 0 ? NONE : r.elements[r.elements.length - 1]!,
+  // stdlib/list.md: take/drop describe "up to n," not an assertion about
+  // length, so both saturate rather than crash — a negative n clamps to 0,
+  // an n past the end clamps to the whole list. Same rule as String's.
+  take: (r, args) => {
+    const n = Math.min(Math.max(Number((args[0] as IntValue).value), 0), r.elements.length);
+    return { type: 'List', elements: r.elements.slice(0, n) };
+  },
+  drop: (r, args) => {
+    const n = Math.min(Math.max(Number((args[0] as IntValue).value), 0), r.elements.length);
+    return { type: 'List', elements: r.elements.slice(n) };
+  },
+  slice: (r, args, { span }) => {
+    const start = Number((args[0] as IntValue).value);
+    const end = Number((args[1] as IntValue).value);
+    if (start < 0 || end > r.elements.length || start > end) {
+      throw new RuntimeError({
+        code: 'R0017', span,
+        data: { start: String(start), end: String(end), length: String(r.elements.length) },
+      });
+    }
+    return { type: 'List', elements: r.elements.slice(start, end) };
+  },
   reverse: (r, _args, ctx) => ({
     type: 'List',
     elements: widenAll([...r.elements].reverse(), elemTypeOf(ctx.receiverType), elemTypeOf(ctx.resultType)),
