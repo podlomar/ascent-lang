@@ -1342,6 +1342,14 @@ export const ERRORS: ErrorEntry[] = [
     "summary": "'==' or '!=' compared a function, or a value built out of one — functions have no equality.",
     "message": "'{op}' can't compare {operands} — a function has no equality.",
     "explanation": "Two functions might compute the exact same result while being written in completely different ways, so there's no honest way to say whether they're \"equal\" — and comparing them by identity instead would be a hidden footgun. So a function can never be compared with '==', even when it's buried inside a record field or a list element rather than compared directly. Compare the specific values that do have equality instead."
+  },
+  {
+    "code": "T0065",
+    "name": "callback-not-function",
+    "category": "type",
+    "summary": "An argument that must be a function value is something else.",
+    "message": "This input has type {actual}, but a function value was expected here.",
+    "explanation": "Some methods — like 'map' — take a function as an argument, and run it once for each item. Here a function value was expected, written something like 'fn(x: Int): String => ...', but the value given has type {actual}."
   }
 ];
 

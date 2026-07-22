@@ -26,20 +26,29 @@ import { tryParseInt, tryParseFloat, tryParseBool } from '../scalar-input.js';
 // key must have a METHOD_IMPLS entry and vice-versa.
 
 // Everything an impl needs beyond its receiver and evaluated args: the call
-// span (for the R#### crashes a few methods raise) and the static types the
+// span (for the R#### crashes a few methods raise), the static types the
 // List methods coerce their elements against when the result widens
-// (design.md §7 — see coerce below).
+// (design.md §7 — see coerce below), and applyFn — a callback-taking method
+// (map/filter/reduce, stdlib/list.md) invokes a Fn value through this rather
+// than importing applyFunction from ../interpreter.ts, which would be
+// circular (interpreter.ts already imports evalMethodCall from this module).
 export type MethodCtx = {
   span: Span;
   receiverType: AscentType;
   argTypes: AscentType[];
   resultType: AscentType;
+  applyFn: (
+    fn: Extract<RuntimeValue, { type: 'Function' }>, args: RuntimeValue[], argTypes: AscentType[],
+  ) => Promise<RuntimeValue>;
 };
 
 // The receiver arrives narrowed to R: the dispatcher only ever calls an entry
-// under the key that matches its receiver's runtime type.
+// under the key that matches its receiver's runtime type. Most impls are
+// plain synchronous data transforms and return a bare RuntimeValue; only the
+// callback-taking List methods need to await ctx.applyFn, so they return a
+// Promise instead — evalMethodCall below awaits either uniformly.
 type MethodImpl<R extends RuntimeValue = RuntimeValue> =
-  (recv: R, args: RuntimeValue[], ctx: MethodCtx) => RuntimeValue;
+  (recv: R, args: RuntimeValue[], ctx: MethodCtx) => RuntimeValue | Promise<RuntimeValue>;
 
 const INT_IMPLS: Record<string, MethodImpl<IntValue>> = {
   // `r` is annotated here (and on Float.toString) only because the key
@@ -243,6 +252,45 @@ const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
     type: 'List',
     elements: widenAll([...r.elements].reverse(), elemTypeOf(ctx.receiverType), elemTypeOf(ctx.resultType)),
   }),
+  // stdlib/list.md's core three — the callback runs once per element through
+  // ctx.applyFn (see MethodCtx), the one way a builtin reaches a Fn value
+  // without importing applyFunction from ../interpreter.ts (circular). The
+  // checker has already proved the callback's param type equals the
+  // receiver's element type exactly (Function types are invariant, §7), so
+  // the element passes straight through with no widening of its own — map's
+  // result element (U) is simply whatever the callback returns.
+  map: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const elemType = elemTypeOf(ctx.receiverType)!;
+    const elements: RuntimeValue[] = [];
+    for (const el of r.elements) {
+      elements.push(await ctx.applyFn(fn, [el], [elemType]));
+    }
+    return { type: 'List', elements };
+  },
+  filter: async (r, args, ctx) => {
+    const fn = args[0] as Extract<RuntimeValue, { type: 'Function' }>;
+    const elemType = elemTypeOf(ctx.receiverType)!;
+    const kept: RuntimeValue[] = [];
+    for (const el of r.elements) {
+      const keep = await ctx.applyFn(fn, [el], [elemType]) as BoolValue;
+      if (keep.value) kept.push(el);
+    }
+    return { type: 'List', elements: kept };
+  },
+  // 'reduce' always takes an explicit init — no seedless overload that traps
+  // on an empty list (stdlib/list.md) — so an empty receiver just returns
+  // init untouched, the loop below never running.
+  reduce: async (r, args, ctx) => {
+    const fn = args[1] as Extract<RuntimeValue, { type: 'Function' }>;
+    const elemType = elemTypeOf(ctx.receiverType)!;
+    const accType = ctx.argTypes[0]!;
+    let acc = args[0]!;
+    for (const el of r.elements) {
+      acc = await ctx.applyFn(fn, [acc, el], [accType, elemType]);
+    }
+    return acc;
+  },
   append: (r, args, ctx) => {
     const toElem = elemTypeOf(ctx.resultType);
     return {
@@ -332,9 +380,9 @@ const evalOrAbort = (receiver: RuntimeValue, args: RuntimeValue[], ctx: MethodCt
 // The one lookup-and-apply rule. Both lookups are total by construction (the
 // checker proved the receiver has this method), so a miss is an internal
 // invariant violation, not a user error.
-export const evalMethodCall = (
+export const evalMethodCall = async (
   receiver: RuntimeValue, method: string, args: RuntimeValue[], ctx: MethodCtx,
-): RuntimeValue => {
+): Promise<RuntimeValue> => {
   // orAbort is the one method not in METHOD_IMPLS — it's polymorphic over
   // Result/Optional, whose runtime values carry no distinguishing type, so it
   // dispatches on the static receiver type instead (see evalOrAbort).
@@ -345,5 +393,5 @@ export const evalMethodCall = (
   if (impls === undefined) throw new Error(`internal: ${receiver.type} has no methods`);
   const impl = impls[method];
   if (impl === undefined) throw new Error(`internal: ${receiver.type} has no method '${method}'`);
-  return impl(receiver, args, ctx);
+  return await impl(receiver, args, ctx);
 };

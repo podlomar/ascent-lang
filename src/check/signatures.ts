@@ -1,7 +1,7 @@
 import type { Span } from '../lexer/token.js';
 import {
   AscentType, TypeKind, INT_TYPE, FLOAT_TYPE, BOOL_TYPE, STRING_TYPE, DONE_TYPE,
-  listOfType, optionalOf, leastCommonType, typesEqual, typeToString, INVALID_TYPE,
+  listOfType, optionalOf, leastCommonType, typesEqual, typeToString, functionType, INVALID_TYPE,
 } from '../types/types.js';
 import { Diagnostics, requireArity, typeMismatch } from './diagnostics.js';
 import { Trait, satisfies } from './traits.js';
@@ -75,6 +75,34 @@ const requireInts = (args: AscentType[], diagnostics: Diagnostics, span: Span): 
     }
   }
   return true;
+};
+
+// A callback argument's shape check, shared by map/filter/reduce (and every
+// later predicate-taking search method). `resultType` is the callback's
+// required result when it's fixed (Bool, for a predicate) or null when it's
+// free (map's U — the only source of it is the callback's own declared
+// result, since nothing else in the call names it). Comparing the WHOLE
+// arrow type — built with the callback's own result standing in for a free
+// U — against the required param types catches a wrong arity, a wrong param
+// type, AND an async callback (§8, sync callbacks only) in one T0015: arrow
+// types are invariant (types.ts), so any of the three makes typesEqual fail
+// and prints two comparable 'Fn(...) -> ...' shapes. A non-Function argument
+// has no result to reuse for that comparison, so it gets its own code
+// (T0065) instead of a fabricated 'expected' type. Returns the resolved
+// result type on success, or null (having already reported) on failure.
+const requireCallback = (
+  paramTypes: AscentType[], resultType: AscentType | null, arg: AscentType, diagnostics: Diagnostics, span: Span,
+): AscentType | null => {
+  if (arg.kind !== 'Function') {
+    diagnostics.error({ code: 'T0065', span, data: { actual: typeToString(arg) } });
+    return null;
+  }
+  const expected = functionType(paramTypes, resultType ?? arg.result, false);
+  if (!typesEqual(arg, expected)) {
+    typeMismatch('T0015', diagnostics, span, expected, arg);
+    return null;
+  }
+  return arg.result;
 };
 
 export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
@@ -184,6 +212,37 @@ export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
         if (recv.kind !== 'List') return INVALID_TYPE;
         if (!requireInts(args, diagnostics, span)) return INVALID_TYPE;
         return listOfType(recv.elem);
+      },
+    },
+    // stdlib/list.md's core three. map/filter place no bound on T (the
+    // element type); U (map's result element) is resolved from the
+    // callback's own declared return type, since nothing else names it.
+    map: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const u = requireCallback([recv.elem], null, args[0]!, diagnostics, span);
+        return u === null ? INVALID_TYPE : listOfType(u);
+      },
+    },
+    filter: {
+      arity: 1,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const kept = requireCallback([recv.elem], BOOL_TYPE, args[0]!, diagnostics, span);
+        return kept === null ? INVALID_TYPE : listOfType(recv.elem);
+      },
+    },
+    // 'reduce' always takes an explicit 'init' — no seedless overload that
+    // traps on an empty list — so its result type (U) comes from init, not
+    // from the step function; step's own declared result must match it.
+    reduce: {
+      arity: 2,
+      resolve: (recv, args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        const initType = args[0]!;
+        const result = requireCallback([initType, recv.elem], initType, args[1]!, diagnostics, span);
+        return result === null ? INVALID_TYPE : result;
       },
     },
     append: { arity: 1, resolve: appendLike },

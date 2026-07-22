@@ -199,12 +199,15 @@ export const evaluateExpr = async (expr: TypedExpr, env: Environment): Promise<R
       const args = await evaluateAll(expr.args, env);
       // The ctx carries the static types alongside the values: the List methods
       // widen their elements to the result element type, and each source's own
-      // static type is the `from` its coercion witness needs.
-      return evalMethodCall(receiver, expr.method, args, {
+      // static type is the `from` its coercion witness needs. applyFn lets a
+      // callback-taking method (map/filter/reduce) invoke a Fn value without
+      // builtins.ts importing applyFunction itself (circular).
+      return await evalMethodCall(receiver, expr.method, args, {
         span: expr.span,
         receiverType: expr.receiver.type,
         argTypes: expr.args.map(a => a.type),
         resultType: expr.type,
+        applyFn: applyFunction,
       });
     }
     case 'construct': {
