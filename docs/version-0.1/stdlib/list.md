@@ -175,9 +175,7 @@ Both generalise the same way: when a `Numeric` trait exists, `sum` becomes `List
 
 ## Shipped in v0.1
 
-Live today: **`length()`, `isEmpty()`, `reverse`, `append`, `prepend`, `concat`, `at`, `first`, `last`, `take`, `drop`, `slice`, `map`, `filter`, `reduce`, `find`, `findIndex`, `contains`, `indexOf`, `some`, `every`, `count`, `sort`, `sortBy`, `sortWith`, `min`, `max`, `zip`, `enumerate`, `join`**, and indexing `xs[i]` (`R0005`).
-
-Planned catalog growth (table entries, no language change): **`sum`.**
+The full catalog above is live: **`length()`, `isEmpty()`, `reverse`, `append`, `prepend`, `concat`, `at`, `first`, `last`, `take`, `drop`, `slice`, `map`, `filter`, `reduce`, `find`, `findIndex`, `contains`, `indexOf`, `some`, `every`, `count`, `sort`, `sortBy`, `sortWith`, `min`, `max`, `zip`, `enumerate`, `join`, `sum`**, plus indexing `xs[i]` (`R0005`).
 
 ---
 

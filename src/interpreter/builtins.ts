@@ -6,7 +6,7 @@ import {
   intVal, floatVal, strVal, boolVal, recordVal, NONE,
   type RuntimeValue, type IntValue, type FloatValue, type BoolValue, type StringValue, type ListValue, type RangeValue,
 } from './values.js';
-import { checkIntOverflow } from './arithmetic.js';
+import { checkIntOverflow, checkFiniteFloat } from './arithmetic.js';
 import { valueToString } from '../parser/printer.js';
 import { tryParseInt, tryParseFloat, tryParseBool } from '../scalar-input.js';
 
@@ -466,6 +466,25 @@ const LIST_IMPLS: Record<string, MethodImpl<ListValue>> = {
   // out every other element type, T0012), so every element is already a
   // StringValue here.
   join: (r, args) => strVal(r.elements.map(el => (el as StringValue).value).join((args[0] as StringValue).value)),
+  // sum is receiver-specific to List<Int>/List<Float> (T0012 elsewhere), and
+  // every runtime element already matches — the coercion witness (coerce, at
+  // every point a value crosses into a List<Float>-typed spot) guarantees a
+  // List<Float>'s elements are always FloatValue, never a raw Int mixed in.
+  // ctx.resultType is already exactly Int or Float (the resolver's own
+  // result), the cheapest way to tell which. [].sum() is 0/0.0, the identity
+  // that falls out of reduce starting from it. Checked the same way '+'
+  // checks each intermediate step (R0001/R0004), so summing a list is exactly
+  // as safe as hand-rolling it with reduce.
+  sum: (r, _args, ctx) => {
+    if (ctx.resultType.kind === 'Float') {
+      let acc = 0;
+      for (const el of r.elements) acc = checkFiniteFloat(acc + (el as FloatValue).value, ctx.span);
+      return floatVal(acc);
+    }
+    let acc = 0n;
+    for (const el of r.elements) acc = checkIntOverflow(acc + (el as IntValue).value, ctx.span);
+    return intVal(acc);
+  },
 };
 
 // design.md §4: a Range is Int-only and half-open. length/toList/contains

@@ -514,6 +514,29 @@ describe('List methods (end-to-end)', () => {
     });
   });
 
+  describe('.sum()', () => {
+    it('sums a List<Int>', async () => {
+      assert.deepEqual(await evalOk('[1, 2, 3].sum();'), { type: 'Int', value: 6n });
+    });
+
+    it('sums a List<Float>', async () => {
+      assert.deepEqual(await evalOk('[1.5, 2.5].sum();'), { type: 'Float', value: 4 });
+    });
+
+    it('is 0/0.0 for an empty receiver — the identity, no empty-list surprise', async () => {
+      assert.deepEqual(await evalOk('fix xs: List<Int> = []; xs.sum();'), { type: 'Int', value: 0n });
+      assert.deepEqual(await evalOk('fix xs: List<Float> = []; xs.sum();'), { type: 'Float', value: 0 });
+    });
+
+    it('reports T0012 (missing method, not a bound violation) for a non-numeric element type', () => {
+      assert.deepEqual(errorCodes('["a", "b"].sum();'), ['T0012']);
+    });
+
+    it('crashes with R0001 on Int overflow, exactly like hand-rolled + would', async () => {
+      assert.equal(await evalCrash('[9223372036854775807, 1].sum();'), 'R0001');
+    });
+  });
+
   describe('map/filter/reduce composed together', () => {
     it('chains map -> filter -> reduce in one expression', async () => {
       assert.deepEqual(

@@ -430,6 +430,21 @@ export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
         return STRING_TYPE;
       },
     },
+    // stdlib/list.md's Aggregate: sum exists on List<Int> and List<Float> and
+    // nowhere else — meaningless for any other element type (a missing
+    // method, T0012, like join above), and its own result type tracks which
+    // of the two matched, so a single-elemKind helper like requireElem
+    // doesn't quite fit; written directly instead.
+    sum: {
+      arity: 0,
+      resolve: (recv, _args, diagnostics, span) => {
+        if (recv.kind !== 'List') return INVALID_TYPE;
+        if (recv.elem.kind === 'Int') return INT_TYPE;
+        if (recv.elem.kind === 'Float') return FLOAT_TYPE;
+        diagnostics.error({ code: 'T0012', span, data: { method: 'sum', type: typeToString(recv) } });
+        return INVALID_TYPE;
+      },
+    },
   },
   // design.md §4: a Range is Int-only, so its methods are all monomorphic —
   // length is how many items it yields, toList materializes them, contains
