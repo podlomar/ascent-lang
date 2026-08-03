@@ -4,7 +4,7 @@ import {
   listOfType, optionalOf, leastCommonType, typesEqual, typeToString, functionType, namedType, pairOf, INVALID_TYPE,
 } from '../types/types.js';
 import { Diagnostics, requireArity, typeMismatch } from './diagnostics.js';
-import { Trait, satisfies } from './traits.js';
+import { BoundTrait, satisfies } from './traits.js';
 
 // ---- Built-in signatures: data, not control flow ----------------------
 //
@@ -461,8 +461,10 @@ export const METHODS: Partial<Record<TypeKind, Record<string, MethodSig>>> = {
 // trait-bounded type variable — the `T: Display` in `print<T: Display>(value:
 // T)`. A bound accepts any argument type satisfying the trait; the variable
 // never escapes into the result (print returns Done), so this needs no
-// generics, only the predicate in traits.ts.
-export type TraitBound = { readonly bound: Trait };
+// generics, only the predicate in traits.ts. Only a `BoundTrait` may appear
+// here — Hashable's predicate needs a TypeEnv, which a signature resolver is
+// never handed, so it can't be expressed as a parameter bound.
+export type TraitBound = { readonly bound: BoundTrait };
 export type ParamType = AscentType | TraitBound;
 export const isTraitBound = (p: ParamType): p is TraitBound => 'bound' in p;
 
